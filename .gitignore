@@ -1,0 +1,31 @@
+# Keil MDK 编译产物
+*.o
+*.d
+*.crf
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.dep
+*.lnp
+*.htm
+*.iex
+*.sct
+*.bak
+*.uvguix.*
+*.scvd
+build.log
+JLinkLog.txt
+Objects/
+Listings/
+DebugConfig/
+EventRecorderStub.scvd
+RTE/_*/
+demo/*/MDK-ARM/*/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
