@@ -1,13 +1,13 @@
 # STM32 HAL 外设练习
 
-STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设一个最小可运行的 demo，全部放在同一个仓库的 `demo/` 下，独立编译、独立下载。
+STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设一个最小可运行的工程，各自独立的 CubeMX 配置、独立编译、独立下载。
 
 ## Demo 一览
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
 | [`demo/led`](demo/led) | PC13 板载 LED，500ms 非阻塞翻转 | ✅ 实测编译 0 Error / 0 Warning |
-| `demo/uart` | USART1 收发 | 计划中 |
+| [`USART_Test`](USART_Test) | USART1 中断回显，验证 `HAL_UART_Receive_IT` 必须重挂 | ✅ 实测通过（含反例现象） |
 | `demo/tim` | TIM1 PWM 输出 | 计划中 |
 
 ## demo/led
@@ -52,18 +52,53 @@ cd demo/led/MDK-ARM
 
 实测结果：`Code=2752  RO-data=304  RW-data=16  ZI-data=1632`，0 Error / 0 Warning。
 
+## USART_Test（USART1 中断回显）
+
+| 项目 | 说明 |
+|---|---|
+| MCU | STM32F103C8T6 |
+| 串口 | USART1，PA9 = TX / PA10 = RX |
+| 参数 | 115200，8-N-1 |
+| 中断 | `USART1 global interrupt`（CubeMX 中勾选） |
+| 接线 | PA9 → USB转TTL 的 RXD，PA10 → TXD，必须共 GND |
+
+核心逻辑（`Core/Src/main.c`，USER CODE 2 与 USER CODE 4）：
+
+```c
+HAL_UART_Receive_IT(&huart1, &rx_byte, 1);   /* 上电武装一次 */
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART1)
+  {
+    HAL_UART_Transmit(&huart1, &rx_byte, 1, 100);   /* 原样回发 */
+    HAL_UART_Receive_IT(&huart1, &rx_byte, 1);      /* 必须重挂，否则只收一个字节 */
+  }
+}
+```
+
+**这个 demo 的重点是反例**：把回调里的 `HAL_UART_Receive_IT` 删掉后，只有第 1 个字节能回显，之后就彻底没反应——因为 HAL 在收完后自己关了 `RXNEIE`（源码 3628 行）并把 `RxState` 置回 `READY`（3637 行），再调回调（3675 行），**没有任何机制会自动重新打开中断**。
+
+完整实验记录（两种现象的对照表、源码行号对应）见 [`USART_Test/README.md`](USART_Test/README.md)。
+
 ## 目录结构
 
 ```
 stm32-hal-demos/
 ├── demo/
-│   └── led/
+│   └── led/                      PC13 非阻塞闪烁
 │       ├── Basic_GPIO.ioc        CubeMX 工程
 │       ├── Core/                 Inc + Src（main / gpio / it / msp / system）
 │       ├── Drivers/
 │       │   ├── CMSIS/            Include + Device/ST/STM32F1xx/Include
 │       │   └── STM32F1xx_HAL_Driver/   Inc + Src
 │       └── MDK-ARM/              uvprojx / uvoptx / startup
+├── USART_Test/                   USART1 中断回显
+│   ├── USART_Test.ioc            CubeMX 工程
+│   ├── Core/                     Inc + Src（main / gpio / usart / it / msp）
+│   ├── Drivers/                  同上
+│   ├── MDK-ARM/                  USART_Test.uvprojx
+│   └── README.md                 实验记录：重挂 vs 不重挂的两种现象
 └── README.md
 ```
 
@@ -73,4 +108,6 @@ stm32-hal-demos/
 
 - 一个 demo 只演示一个外设，尽量不加无关功能。
 - 定时一律用 `HAL_GetTick()` 或定时器，不用 `HAL_Delay()` 阻塞主循环。
+- 中断式外设的回调里，**必须重新武装**（如 `HAL_UART_Receive_IT`），并检查返回值。
 - 编译产物不入库，见 `.gitignore`。
+- 每个 demo 的深度笔记写在它自己的 `README.md` 里，根 README 只放索引和核心片段。
