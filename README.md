@@ -7,6 +7,7 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设一个�
 | 目录 | 内容 | 状态 |
 |---|---|---|
 | [`demo/led`](demo/led) | PC13 板载 LED，500ms 非阻塞翻转 | ✅ 实测编译 0 Error / 0 Warning |
+| [`demo/key-led`](demo/key-led) | PA0 按键消抖翻转 PC13，带一键烧录脚本 | ✅ 实测编译 0 Error / 0 Warning，已上板 |
 | [`USART_Test`](USART_Test) | USART1 中断回显，验证 `HAL_UART_Receive_IT` 必须重挂 | ✅ 实测通过（含反例现象） |
 | `demo/tim` | TIM1 PWM 输出 | 计划中 |
 
@@ -52,6 +53,45 @@ cd demo/led/MDK-ARM
 
 实测结果：`Code=2752  RO-data=304  RW-data=16  ZI-data=1632`，0 Error / 0 Warning。
 
+## demo/key-led（PA0 按键控制 PC13）
+
+| 项目 | 说明 |
+|---|---|
+| MCU | STM32F103C8T6 |
+| LED | PC13，板载，低电平点亮（初值 `GPIO_PIN_SET` = 灭） |
+| 按键 | PA0，内部上拉，按下接地即为低电平 |
+| 消抖 | 20ms 延时 + 二次确认 + 等松手 |
+
+核心逻辑（`Core/Src/main.c`）：
+
+```c
+if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET)
+{
+  HAL_Delay(20);                                            /* 等抖动过去 */
+  if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) /* 再确认 */
+  {
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);                 /* 只翻转一次 */
+    while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET)
+    {
+      /* 等松手：按住期间不再翻转 */
+    }
+  }
+}
+```
+
+两点注意：
+
+- 这是**阻塞式**消抖。`HAL_Delay(20)` 和「等松手」的死循环都会占住主循环，只点一个灯够用；以后加串口、ADC 时要改成 `HAL_GetTick()` 记时间戳的状态机。
+- 四脚轻触开关**同侧两脚内部相通**，PA0 与 GND 必须接**对角**，接同侧会变成常通或常断。
+
+### 一键烧录（不依赖 Keil 的 Reset and Run）
+
+双击 `demo/key-led/flash.bat`：自动定位工程 → 编译 → 用 STM32CubeProgrammer 下载 → 校验 → **复位并运行**。
+
+脚本会自动探测 Keil（`D:\K5\UV4` 或 Program Files）和 `STM32_Programmer_CLI.exe`（`%LOCALAPPDATA%\stm32cube\bundles` 或 CubeProgrammer 安装目录），换机器只需改这两处路径。
+
+实测：`Code=2836  RO-data=304  RW-data=16  ZI-data=1632`，0 Error / 0 Warning。
+
 ## USART_Test（USART1 中断回显）
 
 | 项目 | 说明 |
@@ -86,13 +126,19 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 ```
 stm32-hal-demos/
 ├── demo/
-│   └── led/                      PC13 非阻塞闪烁
-│       ├── Basic_GPIO.ioc        CubeMX 工程
+│   ├── led/                      PC13 非阻塞闪烁
+│   │   ├── Basic_GPIO.ioc        CubeMX 工程
+│   │   ├── Core/                 Inc + Src（main / gpio / it / msp / system）
+│   │   ├── Drivers/
+│   │   │   ├── CMSIS/            Include + Device/ST/STM32F1xx/Include
+│   │   │   └── STM32F1xx_HAL_Driver/   Inc + Src
+│   │   └── MDK-ARM/              uvprojx / uvoptx / startup
+│   └── key-led/                  PA0 按键消抖翻转 PC13
+│       ├── GPIO_Key_LED.ioc      CubeMX 工程
 │       ├── Core/                 Inc + Src（main / gpio / it / msp / system）
-│       ├── Drivers/
-│       │   ├── CMSIS/            Include + Device/ST/STM32F1xx/Include
-│       │   └── STM32F1xx_HAL_Driver/   Inc + Src
-│       └── MDK-ARM/              uvprojx / uvoptx / startup
+│       ├── Drivers/              同上
+│       ├── MDK-ARM/              GPIO_Key_LED.uvprojx
+│       └── flash.bat             一键编译 + 烧录 + 复位
 ├── USART_Test/                   USART1 中断回显
 │   ├── USART_Test.ioc            CubeMX 工程
 │   ├── Core/                     Inc + Src（main / gpio / usart / it / msp）
