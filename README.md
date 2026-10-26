@@ -8,7 +8,7 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设一个�
 |---|---|---|
 | [`demo/led`](demo/led) | PC13 板载 LED，500ms 非阻塞翻转 | ✅ 实测编译 0 Error / 0 Warning |
 | [`demo/key-led`](demo/key-led) | PA0 按键消抖翻转 PC13，带一键烧录脚本 | ✅ 实测编译 0 Error / 0 Warning，已上板 |
-| [`USART_Test`](USART_Test) | USART1 中断回显，验证 `HAL_UART_Receive_IT` 必须重挂 | ✅ 实测通过（含反例现象） |
+| [`USART_Test`](USART_Test) | USART1 中断回显 + printf 重定向，验证 `HAL_UART_Receive_IT` 必须重挂 | ✅ 实测通过（含反例现象；printf 已在 COM4 收到 `hello`） |
 | `demo/tim` | TIM1 PWM 输出 | 计划中 |
 
 ## demo/led

@@ -67,6 +67,72 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 顺带一个易被忽略的细节：3628/3637 都发生在 3675 之前，即 HAL **先**关中断、**先**把 `RxState` 置回 `READY`，**再**调用回调。正因为如此，回调里再调 `HAL_UART_Receive_IT()` 才能顺利通过 `RxState == HAL_UART_STATE_READY` 的检查（1353 行），否则会返回 `HAL_BUSY`。
 
+## 附加实验：printf 重定向到串口
+
+目标：让 `printf` 直接往 USART1 输出，方便调试打日志。
+
+### 为什么不能只写 `fputc`
+
+本工程 `<useUlib>0</useUlib>`，**没有勾选 MicroLIB**，用的是标准 C 库。两种情况差别很大：
+
+| 情况 | printf 底层走谁 | 脱机运行后果 |
+|---|---|---|
+| 勾了 MicroLIB | 直接调用用户实现的 `fputc` | 只写 `fputc` 就够 |
+| **本工程：标准库** | 默认走 **semihosting**：`_write` → `SVC 0xAB` | 该指令要靠调试器转发到 PC；**脱机时无人应答，程序卡死** |
+
+所以标准库下必须同时做三件事：
+
+1. 实现 `fputc`，把字符送到 USART1；
+2. `#pragma import(__use_no_semihosting)`，让链接器不要把 semihosting 打进来；
+3. 补 `_sys_exit` / `_ttywrch` / `struct __FILE` / `__stdout`，否则链接报未定义符号。
+
+### 代码位置
+
+| 区域 | 内容 |
+|---|---|
+| `USER CODE Includes` | `#include <stdio.h>` |
+| `USER CODE 0` | `fputc()` 重定向 + `__use_no_semihosting` + 三个桩函数 |
+| `USER CODE 2` | `printf("hello\r\n");`，位置在 `MX_USART1_UART_Init()` 之后 |
+
+```c
+int fputc(int ch, FILE *f)
+{
+  uint8_t c = (uint8_t)ch;                    /* 只取低 8 位 */
+  HAL_UART_Transmit(&huart1, &c, 1, 0xFFFF);  /* 阻塞发送 1 字节 */
+  return ch;
+}
+
+#pragma import(__use_no_semihosting)
+struct __FILE { int handle; };
+FILE __stdout;
+FILE __stderr;
+void _sys_exit(int x) { x = x; }
+void _ttywrch(int ch) { ch = ch; }
+```
+
+### 怎么验证 semihosting 真的被排除了
+
+编译后反汇编检查有没有 `SVC 0xAB`（有就说明还在走 semihosting）：
+
+```bat
+fromelf -c MDK-ARM\USART_Test\USART_Test.axf | findstr /C:"svc     0xAB"
+```
+
+实测结果：**0 次命中**，`fputc` 在固件里（Code 段 26 字节），printf 只可能走串口。
+
+### 实测记录
+
+| 项目 | 结果 |
+|---|---|
+| 编译 | 0 Error / 0 Warning，`Code=4952 RO=312 RW=24 ZI=1704` |
+| 反汇编 | `svc 0xAB` 出现 **0** 次 |
+| 上板 | 串口助手（COM4，CH340，115200 8N1）收到 `hello` ✅ |
+
+### 两个容易踩的坑
+
+1. **`hello` 只在开机时打印一次**。它写在 `while(1)` 之前，端口没打开就永远看不到——想重测就按板子 RESET，不用重新烧录。
+2. **必须用 `\r\n`**，只发 `\n` 串口助手不会回行首；另外中文会按 Keil 源文件的 GBK 编码发出，接收端要设成 GBK 才不乱码。
+
 ## 结论
 
 1. `HAL_UART_Receive_IT()` 是**一次性武装**：收满指定长度后自动解除，不自动续杯。

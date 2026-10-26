@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>          /* printf / fputc / FILE 的声明 */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,7 +55,39 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/**
+  * @brief  printf 重定向：printf 的底层输出最终会调用 fputc
+  * @note   本工程未勾选 MicroLIB（useUlib=0），用的是标准 C 库。
+  *         标准库的 printf 底层默认走 semihosting（靠调试器转发），
+  *         脱机运行时没人应答，会直接卡死。所以必须自己实现 fputc 顶掉它。
+  * @param  ch : 要输出的字符（int 是标准库的约定，只有低 8 位有效）
+  * @param  f  : 目标流（stdout/stderr），这里不用区分，一律从 USART1 发
+  * @retval 返回写出的字符，表示成功
+  */
+int fputc(int ch, FILE *f)
+{
+  uint8_t c = (uint8_t)ch;                    /* 只取低 8 位，避免把 int 高位也发出去 */
+  HAL_UART_Transmit(&huart1, &c, 1, 0xFFFF);  /* 阻塞发送 1 字节，超时给足（约 87us 就发完） */
+  return ch;
+}
 
+/* ---- 以下三个桩是"不用 semihosting"时必须提供的，否则链接会报未定义符号 ---- */
+/* Keil AC5 语法：告诉链接器不要把 semihosting 打进来 */
+#pragma import(__use_no_semihosting)
+
+struct __FILE { int handle; };   /* 标准库内部用来描述流的类型 */
+FILE __stdout;                   /* printf 默认写的就是这个流 */
+FILE __stderr;
+
+void _sys_exit(int x)            /* 库在异常退出时会调用它 */
+{
+  x = x;
+}
+
+void _ttywrch(int ch)            /* 库在某些调试输出时会调用它 */
+{
+  ch = ch;
+}
 /* USER CODE END 0 */
 
 /**
@@ -89,6 +121,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+  printf("hello\r\n");                         /* 串口重定向自检：串口助手应收到 hello */
   HAL_UART_Receive_IT(&huart1, &rx_byte, 1);   /* 启动第一次中断接收：收满1字节触发回调 */
   /* USER CODE END 2 */
 
