@@ -133,9 +133,72 @@ fromelf -c MDK-ARM\USART_Test\USART_Test.axf | findstr /C:"svc     0xAB"
 1. **`hello` 只在开机时打印一次**。它写在 `while(1)` 之前，端口没打开就永远看不到——想重测就按板子 RESET，不用重新烧录。
 2. **必须用 `\r\n`**，只发 `\n` 串口助手不会回行首；另外中文会按 Keil 源文件的 GBK 编码发出，接收端要设成 GBK 才不乱码。
 
+## 实验 C：环形缓冲 + 分帧（整行处理）
+
+实验室 A 那种「收 1 字节就在回调里回发 1 字节」的做法，在连发时会丢数据。原因是：
+
+| 项 | 数值 |
+|---|---|
+| 115200 8N1 的字节间隔 | **86.8 µs** |
+| F1 接收寄存器深度 | **1 字节**（无 FIFO） |
+| 回调里阻塞回发 1 字节 + 中断开销 | **≈ 90 µs** |
+
+处理一个字节的时间 > 到达一个字节的时间，第 2 个字节到达时 `DR` 还没被读走 → `ORE` 溢出 → 丢字节。而且 HAL 在调用 `RxCpltCallback` **之前**就关掉了 `RXNE` 中断，这 87µs 里完全没人收数据。
+
+改成两层结构：
+
+```
+中断（快，1~2µs）:  rx_push(byte)  +  重新武装 Receive_IT
+主循环（慢，无所谓）: rx_pop() 直到 '\n' → 整行处理
+```
+
+### 关键实现
+
+```c
+/* 中断里：只登记，不处理 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART1)
+  {
+    rx_push(rx_byte);                            /* 塞进环形缓冲 */
+    HAL_UART_Receive_IT(&huart1, &rx_byte, 1);   /* 一次性武装，必须重挂 */
+  }
+}
+```
+
+```c
+/* 单生产者（中断写 rx_head）/ 单消费者（主循环写 rx_tail），各改各的指针，不用关中断 */
+static void rx_push(uint8_t b)
+{
+  uint16_t next = (uint16_t)((rx_head + 1u) % RX_RING_SIZE);
+  if (next != rx_tail) { rx_ring[rx_head] = b; rx_head = next; }
+  else                 { rx_drop++; }            /* 满则丢新字节并计数 */
+}
+```
+
+另外补了 `HAL_UART_ErrorCallback`：F1 发生 `ORE` 后 HAL 会把 `RxState` 打回 `READY` 且不再收数据，必须 `__HAL_UART_CLEAR_OREFLAG()` + 重新武装，否则串口从此"失聪"。
+
+### 预期现象
+
+串口助手一次性发送 `abcdefghijklmnopqrstuvwxyz`（不带回车也行，勾「自动加 \r\n」）：
+
+| 发送 | 应答 |
+|---|---|
+| `hello` | `ECHO[5]: hello` |
+| `abcdefghijklmnopqrstuvwxyz` | `ECHO[26]: abcdefghijklmnopqrstuvwxyz` |
+| 超过 63 字符的一行 | `ERR: line longer than 63, dropped` |
+| 缓冲被打满 | `WARN: ring full, dropped N byte(s)` ← 出现这行说明还是丢了字节，需要加大缓冲或降低速率 |
+
+### 状态
+
+编译验证：0 Error / 0 Warning，`Code=5816 RO=312 RW=32 ZI=1896`。
+**上板实测待补**（改造完成时 ST-Link 与 USB-TTL 均未连接）。
+
 ## 结论
 
 1. `HAL_UART_Receive_IT()` 是**一次性武装**：收满指定长度后自动解除，不自动续杯。
 2. 每收完一批数据都必须重新调用一次，位置就在 `HAL_UART_RxCpltCallback()` 里。
 3. 重挂时要检查返回值（`HAL_OK` / `HAL_BUSY`），否则重挂失败是静默的，症状同样是“只收一次”。
 4. 需要收变长数据时改用 `HAL_UARTEx_ReceiveToIdle_IT()`，它在总线空闲时触发回调，同样需要重挂。
+5. **中断里只登记事件，不在中断里做阻塞发送**。收 1 字节就回 1 字节的写法，在 115200 连发时必然丢数据；正确做法是环形缓冲 + 主循环分帧（实验 C）。
+6. 中断和主循环共享的变量必须 `volatile`，否则 `-O2` 下主循环可能只读一次，永远看不到中断写入的值。
