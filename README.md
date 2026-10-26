@@ -9,6 +9,7 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设一个�
 | [`demo/led`](demo/led) | PC13 板载 LED，500ms 非阻塞翻转 | ✅ 实测编译 0 Error / 0 Warning |
 | [`demo/key-led`](demo/key-led) | PA0 按键消抖翻转 PC13，带一键烧录脚本 | ✅ 实测编译 0 Error / 0 Warning，已上板 |
 | [`demo/exti-key`](demo/exti-key) | EXTI 外部中断版按键：下降沿触发 + 中断内 30ms 去抖 | ✅ 实测编译 0 Error / 0 Warning |
+| [`demo/tim`](demo/tim) | TIM2 更新中断每 500ms 翻转 PC13（替代 `HAL_GetTick()` 轮询） | ✅ 实测编译 0 Error / 0 Warning |
 | [`USART_Test`](USART_Test) | USART1 中断回显 + printf 重定向，验证 `HAL_UART_Receive_IT` 必须重挂 | ✅ 实测通过（含反例现象；printf 已在 COM4 收到 `hello`） |
 | `demo/tim` | TIM1 PWM 输出 | 计划中 |
 
@@ -137,6 +138,57 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 编译：`Code=2852 RO=304 RW=20 ZI=1636`，0 Error / 0 Warning。
 
+## demo/tim（TIM2 中断 500ms 翻转 PC13）
+
+把 `demo/led` 里 `HAL_GetTick()` 轮询翻转的做法，换成**硬件定时器更新中断**驱动。这个工程是用 CubeMX 图形界面配置生成的，`.ioc` 里 TIM2 配置完整。
+
+### 参数怎么来的
+
+```
+TIM2 挂 APB1。APB1 = 36MHz（2 分频）时，定时器时钟 = PCLK1 × 2 = 72MHz
+目标 500ms：总计数 = 72,000,000 × 0.5 = 36,000,000
+拆成两个 16 位因子：7200 × 5000 = 36,000,000
+```
+
+| 寄存器 | CubeMX 字段 | 意义 | 填值 |
+|---|---|---|---|
+| `PSC` | Prescaler | 分频系数 − 1 | **7199**（→ 计数频率 10kHz） |
+| `ARR` | Counter Period | 计数上限 − 1 | **4999**（0~4999 共 5000 次） |
+
+两者都 ≤ 65535。注意寄存器存的是「减一」后的值：PSC 填 0 才是「不分频」，ARR 填 0 才是「每计 1 次就溢出」。
+
+### 代码位置
+
+| 文件 / 区域 | 内容 |
+|---|---|
+| `Core/Src/tim.c` | `MX_TIM2_Init()`（PSC/ARR/内部时钟）+ `HAL_TIM_Base_MspInit()`（开 TIM2 时钟、NVIC 使能） |
+| `Core/Src/main.c` → `USER CODE 2` | `HAL_TIM_Base_Start_IT(&htim2);` |
+| `Core/Src/main.c` → `USER CODE 4` | `HAL_TIM_PeriodElapsedCallback()`：判断 `Instance == TIM2` 后翻转 PC13 |
+| `Core/Src/stm32f1xx_it.c` | `TIM2_IRQHandler()` → `HAL_TIM_IRQHandler(&htim2)` |
+
+### 中断的完整调用链
+
+```
+CNT 计到 4999 → 归零并置 SR.UIF
+   → DIER.UIE=1 且 NVIC 已使能 → 内核按向量表跳 TIM2_IRQHandler()
+   → HAL_TIM_IRQHandler()：查标志、清 UIF、分发
+   → HAL_TIM_PeriodElapsedCallback()（HAL 里是 __weak 空实现，被 main.c 同名函数覆盖）
+   → HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13)
+```
+
+### 踩过的坑（真实记录）
+
+1. **Counter Period 默认 65535** —— 只在 CubeMX 里填了 Prescaler，`Period` 没写进 `.ioc`（`TIM2.IPParameters=Prescaler`），生成出来是 `Period = 65535` → 实际周期 **6.55 秒**而不是 500ms。已把 `Period` 加入 `IPParameters` 并设为 4999。
+2. **漏 `HAL_TIM_Base_Start_IT()`** —— 计数器在跑、`UIF` 也置位，但永远不进中断（`HAL_TIM_Base_Start()` 不使能更新中断）。
+3. **回调必须判断 `Instance`** —— 所有定时器共用一个回调，不判断的话多个定时器都会触发同一段逻辑。
+4. **PC13 初值是 `GPIO_PIN_RESET`（低电平）** —— 板载 LED 低电平点亮，所以上电先亮 500ms 再进入正常闪烁。
+
+### 编译
+
+`Code=3980 RO=304 RW=16 ZI=1704`，0 Error / 0 Warning。
+
+**上板实测待补**：ST-Link 能被识别，但连接目标时报 `Unable to get core ID`（SWD 未连通或目标未供电），所以灯的实际翻转周期尚未用仪器确认。
+
 ## USART_Test（USART1 中断回显）
 
 | 项目 | 说明 |
@@ -179,16 +231,21 @@ stm32-hal-demos/
 │   │   │   └── STM32F1xx_HAL_Driver/   Inc + Src
 │   │   └── MDK-ARM/              uvprojx / uvoptx / startup
 │   ├── key-led/                  PA0 按键消抖翻转 PC13
-│       ├── GPIO_Key_LED.ioc      CubeMX 工程
-│       ├── Core/                 Inc + Src（main / gpio / it / msp / system）
+│   │   ├── GPIO_Key_LED.ioc      CubeMX 工程
+│   │   ├── Core/                 Inc + Src（main / gpio / it / msp / system）
+│   │   ├── Drivers/              同上
+│   │   ├── MDK-ARM/              GPIO_Key_LED.uvprojx
+│   │   └── flash.bat             一键编译 + 烧录 + 复位
+│   ├── exti-key/                 EXTI 外部中断版按键
+│   │   ├── EXTI_Key_LED.ioc      CubeMX 工程（PA0 = Falling edge trigger）
+│   │   ├── Core/                 Inc + Src（中断回调在 main.c 的 USER CODE 4）
+│   │   ├── Drivers/              同上
+│   │   └── MDK-ARM/              EXTI_Key_LED.uvprojx
+│   └── tim/                      TIM2 中断 500ms 翻转 PC13
+│       ├── TIM2.ioc              CubeMX 工程（TIM2 = Internal Clock, PSC 7199 / ARR 4999）
+│       ├── Core/                 Inc + Src（tim.c = TIM2 配置）
 │       ├── Drivers/              同上
-│       ├── MDK-ARM/              GPIO_Key_LED.uvprojx
-│       └── flash.bat             一键编译 + 烧录 + 复位
-│   └── exti-key/                 EXTI 外部中断版按键
-│       ├── EXTI_Key_LED.ioc      CubeMX 工程（PA0 = Falling edge trigger）
-│       ├── Core/                 Inc + Src（中断回调在 main.c 的 USER CODE 4）
-│       ├── Drivers/              同上
-│       └── MDK-ARM/              EXTI_Key_LED.uvprojx
+│       └── MDK-ARM/              TIM2.uvprojx
 ├── USART_Test/                   USART1 中断回显
 │   ├── USART_Test.ioc            CubeMX 工程
 │   ├── Core/                     Inc + Src（main / gpio / usart / it / msp）
