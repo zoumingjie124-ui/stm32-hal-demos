@@ -9,6 +9,7 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设一个�
 | [`demo/led`](demo/led) | PC13 板载 LED，500ms 非阻塞翻转 | ✅ 实测编译 0 Error / 0 Warning |
 | [`demo/key-led`](demo/key-led) | PA0 按键消抖翻转 PC13，带一键烧录脚本 | ✅ 实测编译 0 Error / 0 Warning，已上板 |
 | [`demo/exti-key`](demo/exti-key) | EXTI 外部中断版按键：下降沿触发 + 中断内 30ms 去抖 | ✅ 实测编译 0 Error / 0 Warning |
+| [`demo/tim`](demo/tim) | TIM2 更新中断每 500ms 翻转 PC13（替代 `HAL_GetTick()` 轮询） | ✅ 实测编译 0 Error / 0 Warning |
 | [`USART_Test`](USART_Test) | USART1 中断回显 + printf 重定向，验证 `HAL_UART_Receive_IT` 必须重挂 | ✅ 实测通过（含反例现象；printf 已在 COM4 收到 `hello`） |
 | `demo/tim` | TIM1 PWM 输出 | 计划中 |
 
@@ -137,6 +138,56 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 编译：`Code=2852 RO=304 RW=20 ZI=1636`，0 Error / 0 Warning。
 
+## demo/tim（TIM2 中断 500ms 翻转 PC13）
+
+把 `demo/led` 里 `HAL_GetTick()` 轮询翻转的做法，换成**硬件定时器中断驱动**。
+
+### 参数怎么来的
+
+```
+TIM2 挂 APB1。APB1 = 36MHz（2 分频）时，定时器时钟 = PCLK1 × 2 = 72MHz
+目标 500ms：总计数 = 72,000,000 × 0.5 = 36,000,000
+拆成两个 16 位因子：7200 × 5000 = 36,000,000
+```
+
+| 寄存器 | 意义 | 填值 | 反推 |
+|---|---|---|---|
+| `PSC` | 分频系数 − 1 | **7199** | 7200 分频 → 计数频率 10kHz |
+| `ARR` | 计数上限 − 1 | **4999** | 0~4999 共 5000 次 → 500ms |
+
+两者都 ≤ 65535，符合 16 位限制。注意寄存器里存的是「减一」后的值：PSC 填 0 才是「不分频」，ARR 填 0 才是「每计 1 次就溢出」。
+
+### 代码位置
+
+| 文件 | 内容 |
+|---|---|
+| `Core/Src/tim.c` | `MX_TIM2_Init()`：PSC/ARR/内部时钟源；`HAL_TIM_Base_MspInit()` 里开 TIM2 时钟 + NVIC 使能 |
+| `Core/Src/main.c` → `USER CODE 2` | `HAL_TIM_Base_Start_IT(&htim2);` **不调用这句永远不进中断** |
+| `Core/Src/main.c` → `USER CODE 4` | `HAL_TIM_PeriodElapsedCallback()`：判断 `Instance == TIM2` 后翻转 PC13 |
+| `Core/Src/stm32f1xx_it.c` | `TIM2_IRQHandler()` → `HAL_TIM_IRQHandler(&htim2)` |
+| `Core/Inc/stm32f1xx_hal_conf.h` | `HAL_TIM_MODULE_ENABLED` 必须**解除注释**，否则 `stm32f1xx_hal_tim.h` 根本不被包含 |
+
+### 和 demo/led 的对比
+
+| | `demo/led`（`HAL_GetTick`） | `demo/tim`（TIM2 中断） |
+|---|---|---|
+| 谁判断时间 | 主循环每圈比较一次 | 硬件计数器到点自动触发 |
+| 主循环 | 一直在转 | 空循环，平时 0 占用 |
+| 精度 | 受主循环里其他代码影响 | 由硬件时钟保证，与软件无关 |
+| 扩展性 | 主循环一卡就滞后 | 不受影响 |
+| 资源 | 不占外设 | 占用 TIM2 + 一个 NVIC 通道 |
+
+### ⚠️ 关于 `.ioc`
+
+**`TIM2_Toggle.ioc` 里没有 TIM2 的配置**，TIM2 只存在于代码（`tim.c`）。这是已知限制：
+
+- 尝试过直接把 `TIM2.Prescaler` / `TIM2.Period` / `NVIC.TIM2_IRQn` 等键写进 `.ioc`，CubeMX 加载后**会把这些键整体丢弃**（它对 IP 配置的键集要求比"三个参数"严格得多），生成时也不会产生 `tim.c`。
+- 因此本工程的 `.ioc` 只反映 GPIO + 时钟 + SWD 配置。**在 CubeMX 里点 GENERATE CODE 会覆盖 `tim.c` / `stm32f1xx_it.c` 里手写的部分**。
+- 要用 CubeMX 管理 TIM2，正确做法是：CubeMX 打开 → Timers → TIM2 → Clock Source = Internal Clock → Prescaler = 7199、Counter Period = 4999 → NVIC 勾 `TIM2 global interrupt` → 生成。生成出来的 `tim.c` 与现在这份参数完全一致。
+
+编译：`Code=3996 RO=304 RW=16 ZI=1704`，0 Error / 0 Warning。
+**上板实测待补**（建工程时 ST-Link 未连接）。
+
 ## USART_Test（USART1 中断回显）
 
 | 项目 | 说明 |
@@ -184,11 +235,16 @@ stm32-hal-demos/
 │       ├── Drivers/              同上
 │       ├── MDK-ARM/              GPIO_Key_LED.uvprojx
 │       └── flash.bat             一键编译 + 烧录 + 复位
-│   └── exti-key/                 EXTI 外部中断版按键
+│   ├── exti-key/                 EXTI 外部中断版按键
 │       ├── EXTI_Key_LED.ioc      CubeMX 工程（PA0 = Falling edge trigger）
 │       ├── Core/                 Inc + Src（中断回调在 main.c 的 USER CODE 4）
 │       ├── Drivers/              同上
 │       └── MDK-ARM/              EXTI_Key_LED.uvprojx
+│   └── tim/                      TIM2 中断 500ms 翻转 PC13
+│       ├── TIM2_Toggle.ioc       CubeMX 工程（仅 GPIO/时钟，TIM2 在代码里）
+│       ├── Core/                 Inc + Src（tim.c = TIM2 配置）
+│       ├── Drivers/              同上
+│       └── MDK-ARM/              TIM2_Toggle.uvprojx
 ├── USART_Test/                   USART1 中断回显
 │   ├── USART_Test.ioc            CubeMX 工程
 │   ├── Core/                     Inc + Src（main / gpio / usart / it / msp）
