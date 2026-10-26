@@ -8,6 +8,7 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设一个�
 |---|---|---|
 | [`demo/led`](demo/led) | PC13 板载 LED，500ms 非阻塞翻转 | ✅ 实测编译 0 Error / 0 Warning |
 | [`demo/key-led`](demo/key-led) | PA0 按键消抖翻转 PC13，带一键烧录脚本 | ✅ 实测编译 0 Error / 0 Warning，已上板 |
+| [`demo/exti-key`](demo/exti-key) | EXTI 外部中断版按键：下降沿触发 + 中断内 30ms 去抖 | ✅ 实测编译 0 Error / 0 Warning |
 | [`USART_Test`](USART_Test) | USART1 中断回显 + printf 重定向，验证 `HAL_UART_Receive_IT` 必须重挂 | ✅ 实测通过（含反例现象；printf 已在 COM4 收到 `hello`） |
 | `demo/tim` | TIM1 PWM 输出 | 计划中 |
 
@@ -92,6 +93,50 @@ if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET)
 
 实测：`Code=2836  RO-data=304  RW-data=16  ZI-data=1632`，0 Error / 0 Warning。
 
+## demo/exti-key（EXTI 外部中断版按键）
+
+和 `demo/key-led` 同一个硬件、同一颗灯，区别是**不再轮询，靠 EXTI 中断触发**。
+
+| | key-led（轮询） | exti-key（中断） |
+|---|---|---|
+| 触发方式 | `while(1)` 里反复读 PA0 | PA0 电平跳变触发硬件中断 |
+| CPU 占用 | 主循环一直在转 | 平时 0，事件来了才进 |
+| 去抖 | `HAL_Delay(20)` + 二次确认（**阻塞**） | 中断里比较 `HAL_GetTick()` 时间戳，30ms 内重复触发直接丢 |
+| 按住时 | `while` 卡住整个主循环 | 不阻塞主循环，但**中断本身必须短** |
+
+### 代码位置
+
+| 区域 | 内容 |
+|---|---|
+| `main.c` → `USER CODE 4` | `HAL_GPIO_EXTI_Callback()`：30ms 去抖 + 翻转 PC13 |
+| `stm32f1xx_it.c` | `EXTI0_IRQHandler()` → `HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0)` |
+| `gpio.c` | PA0 = `GPIO_MODE_IT_FALLING` + `GPIO_PULLUP`；NVIC `EXTI0_IRQn` 已使能，优先级 0 |
+
+```c
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  static uint32_t last_tick = 0;
+
+  if (GPIO_Pin == GPIO_PIN_0)
+  {
+    uint32_t now = HAL_GetTick();
+    if ((now - last_tick) >= 30u)      /* 30ms 内的重复触发当作抖动忽略 */
+    {
+      last_tick = now;
+      HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    }
+  }
+}
+```
+
+### 三个坑
+
+1. **边沿选反**：按键一端接 GND、内部上拉，所以**按下是下降沿**。配成 `IT_RISING` 的现象是「按下没反应，松手才翻灯」——很容易误判成按键坏了。
+2. **改 `gpio.c` 会被覆盖**：它是 CubeMX 生成物，重新 `GENERATE CODE` 会把边沿改回去。正解是在 `.ioc` 里把 PA0 设成 `External Interrupt Mode with Falling edge trigger detection`。
+3. **中断里不能阻塞**：不要放 `HAL_Delay()` 或串口阻塞发送。另外 EXTI0 优先级是 **0**，高于 SysTick 的 **15**，所以在中断里调 `HAL_GetTick()` 时 tick 可能还没推进（同一毫秒内）——这也意味着去抖阈值不能设成 1~2ms 那种量级。
+
+编译：`Code=2852 RO=304 RW=20 ZI=1636`，0 Error / 0 Warning。
+
 ## USART_Test（USART1 中断回显）
 
 | 项目 | 说明 |
@@ -133,12 +178,17 @@ stm32-hal-demos/
 │   │   │   ├── CMSIS/            Include + Device/ST/STM32F1xx/Include
 │   │   │   └── STM32F1xx_HAL_Driver/   Inc + Src
 │   │   └── MDK-ARM/              uvprojx / uvoptx / startup
-│   └── key-led/                  PA0 按键消抖翻转 PC13
+│   ├── key-led/                  PA0 按键消抖翻转 PC13
 │       ├── GPIO_Key_LED.ioc      CubeMX 工程
 │       ├── Core/                 Inc + Src（main / gpio / it / msp / system）
 │       ├── Drivers/              同上
 │       ├── MDK-ARM/              GPIO_Key_LED.uvprojx
 │       └── flash.bat             一键编译 + 烧录 + 复位
+│   └── exti-key/                 EXTI 外部中断版按键
+│       ├── EXTI_Key_LED.ioc      CubeMX 工程（PA0 = Falling edge trigger）
+│       ├── Core/                 Inc + Src（中断回调在 main.c 的 USER CODE 4）
+│       ├── Drivers/              同上
+│       └── MDK-ARM/              EXTI_Key_LED.uvprojx
 ├── USART_Test/                   USART1 中断回显
 │   ├── USART_Test.ioc            CubeMX 工程
 │   ├── Core/                     Inc + Src（main / gpio / usart / it / msp）
