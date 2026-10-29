@@ -10,8 +10,9 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设一个�
 | [`demo/key-led`](demo/key-led) | PA0 按键消抖翻转 PC13，带一键烧录脚本 | ✅ 实测编译 0 Error / 0 Warning，已上板 |
 | [`demo/exti-key`](demo/exti-key) | EXTI 外部中断版按键：下降沿触发 + 中断内 30ms 去抖 | ✅ 实测编译 0 Error / 0 Warning |
 | [`demo/tim`](demo/tim) | TIM2 更新中断每 500ms 翻转 PC13（替代 `HAL_GetTick()` 轮询） | ✅ 实测编译 0 Error / 0 Warning |
+| [`demo/adc`](demo/adc) | PA1 单通道 ADC 采样，`printf` 输出 raw / mV，已用电位器验证线性 | ✅ 实测编译 0 Error / 0 Warning，已上板 |
 | [`USART_Test`](USART_Test) | USART1 中断回显 + printf 重定向，验证 `HAL_UART_Receive_IT` 必须重挂 | ✅ 实测通过（含反例现象；printf 已在 COM4 收到 `hello`） |
-| `demo/tim` | TIM1 PWM 输出 | 计划中 |
+| `demo/pwm` | TIM1 PWM 输出 | 计划中 |
 
 ## demo/led
 
@@ -196,6 +197,66 @@ CNT 计到 4999 → 归零并置 SR.UIF
 **上板实测待补**：曾因 `SYS = No Debug` 导致 SWD 被关闭而无法连接（已修复，见上面第 5 条），
 灯的实际翻转周期尚未用仪器确认。
 
+## demo/adc（PA1 单通道 ADC + 串口打印）
+
+电位器分压 → PA1 采样 → 换算成 mV → 每 500ms 从 USART1 打印一行。
+
+### 配置
+
+| 项 | 值 |
+|---|---|
+| ADC | ADC1，通道 **IN1（PA1）** |
+| 转换模式 | 单次、**软件触发**、不扫描 |
+| 采样时间 | **55.5 cycles** |
+| ADC 时钟 | **PCLK2 ÷ 6 = 12MHz**（F103 的 ADC 上限是 14MHz，36MHz 会超） |
+| 触发节奏 | 主循环每 500ms 一次 |
+
+单次转换耗时 = (55.5 + 12.5) / 12MHz ≈ **5.67 µs**，采样周期远小于节奏，不会有堆积。
+
+### 代码位置（都在 USER CODE 段，重新生成不会被覆盖）
+
+| 区域 | 内容 |
+|---|---|
+| `USER CODE PD` | `ADC_USE_PRINTF` 开关（没有串口时置 0，避免 printf 走 semihosting 卡死） |
+| `USER CODE 0` | `fputc` 重定向 + `__use_no_semihosting` + `_sys_exit/_ttywrch/__FILE` |
+| `USER CODE 2` | `HAL_ADCEx_Calibration_Start(&hadc1)` —— 第一次转换前自校准 |
+| `USER CODE 3` | `HAL_ADC_Start → PollForConversion(10ms) → GetValue → 换算 → printf → HAL_Delay(500)` |
+
+### 换算公式与那个 `uint32_t`
+
+```c
+uint32_t raw = HAL_ADC_GetValue(&hadc1);   /* 12 位右对齐：0 ~ 4095 */
+uint32_t mv  = raw * 3300u / 4095u;        /* 满量程 3300mV 对应 4095 */
+```
+
+`raw` 必须是 32 位：`4095 × 3300 = 13,513,500`，**远超 uint16_t 的 65535**。若写成 `uint16_t mv = raw * 3300 / 4095`，乘法先溢出，结果错得没有规律——而且小数值时是对的，接近满量程才炸。
+
+### 实测记录（SWD 直接读 RAM，与固件输出交叉验证）
+
+| `raw` | 固件算出的 mV | 手算 `raw*3300/4095` | 一致 |
+|---|---|---|---|
+| 1806 | 1455 | 1455 | ✅ |
+| 843 | 679 | 679 | ✅ |
+| 587 | 473 | 473 | ✅ |
+| 483 | 389 | 389 | ✅ |
+
+接上电位器后，同一位置连续 6 次读数稳定在 **481~483（波动 2 LSB ≈ 1.6mV）**；未接时（PA1 悬空）读数在 587~1806 之间乱跳 —— 这个对比本身就证明输入确实接到了低阻信号源。
+
+### 精度分析（哪些误差修了、哪些没修）
+
+| 误差项 | 量级 | 校准能修吗 |
+|---|---|---|
+| 零点偏移 | 校准后 < 1 LSB（~0.8mV） | ✅ 已修 |
+| 噪声 | ±2 LSB（~1.6mV） | ❌ 需多次采样平均 |
+| **VDDA 实际值** | 实测 **3.27V**，代码按 3300 算 → 系统偏高约 **0.9%（~30mV）** | ❌ 需读内部 `Vrefint` 或外部基准 |
+
+**当前最大的一项误差不是 ADC，是“假设 3.3V 就是 3.3V”。** 要提高绝对精度，下一步应该读 `Vrefint` 反推真实 VDDA。
+
+### 两个坑
+
+1. **没有串口时不要开 `printf`** —— 标准库会走 semihosting（`SVC 0xAB`），脱机运行时没人应答，程序直接卡死。所以本工程用 `ADC_USE_PRINTF` 开关控制，配好 USART1 并加上 `fputc` 后才置 1。
+2. **PA1 悬空时读数乱跳是正常的** —— 高阻输入在拾取环境噪声。判断“ADC 坏没坏”不能看数值大小，要看**接上确定电压后是否稳定、是否随输入线性变化**。
+
 ## USART_Test（USART1 中断回显）
 
 | 项目 | 说明 |
@@ -248,11 +309,16 @@ stm32-hal-demos/
 │   │   ├── Core/                 Inc + Src（中断回调在 main.c 的 USER CODE 4）
 │   │   ├── Drivers/              同上
 │   │   └── MDK-ARM/              EXTI_Key_LED.uvprojx
-│   └── tim/                      TIM2 中断 500ms 翻转 PC13
-│       ├── TIM2.ioc              CubeMX 工程（TIM2 = Internal Clock, PSC 7199 / ARR 4999）
-│       ├── Core/                 Inc + Src（tim.c = TIM2 配置）
+│   ├── tim/                      TIM2 中断 500ms 翻转 PC13
+│   │   ├── TIM2.ioc              CubeMX 工程（TIM2 = Internal Clock, PSC 7199 / ARR 4999）
+│   │   ├── Core/                 Inc + Src（tim.c = TIM2 配置）
+│   │   ├── Drivers/              同上
+│   │   └── MDK-ARM/              TIM2.uvprojx
+│   └── adc/                      PA1 单通道 ADC + 串口打印
+│       ├── ADC.ioc               CubeMX 工程（ADC1_IN1 / PCLK2÷6 / USART1）
+│       ├── Core/                 Inc + Src（adc.c / usart.c / main.c）
 │       ├── Drivers/              同上
-│       └── MDK-ARM/              TIM2.uvprojx
+│       └── MDK-ARM/              ADC.uvprojx
 ├── USART_Test/                   USART1 中断回显
 │   ├── USART_Test.ioc            CubeMX 工程
 │   ├── Core/                     Inc + Src（main / gpio / usart / it / msp）
