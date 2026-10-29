@@ -182,12 +182,19 @@ CNT 计到 4999 → 归零并置 SR.UIF
 2. **漏 `HAL_TIM_Base_Start_IT()`** —— 计数器在跑、`UIF` 也置位，但永远不进中断（`HAL_TIM_Base_Start()` 不使能更新中断）。
 3. **回调必须判断 `Instance`** —— 所有定时器共用一个回调，不判断的话多个定时器都会触发同一段逻辑。
 4. **PC13 初值是 `GPIO_PIN_RESET`（低电平）** —— 板载 LED 低电平点亮，所以上电先亮 500ms 再进入正常闪烁。
+5. **`SYS → Debug = No Debug` 会把调试口关死（本工程最初就踩了这个）** —— CubeMX 在这个选项下会生成
+   `__HAL_AFIO_REMAP_SWJ_DISABLE()`，程序一启动 SWD 和 JTAG 全部关闭，之后**任何工程都烧不进去**，
+   Keil 报 `No target connected` / `Flash Download failed`，CubeProgrammer 报 `Unable to get core ID`。
+   救回来的办法：**BOOT0 跳 1 + 复位**（用户程序不执行，SWD 恢复），烧完再跳回 0；或者给 ST-Link 接 NRST 用 connect-under-reset。
+   已改为 `Serial Wire`（生成 `__HAL_AFIO_REMAP_SWJ_NOJTAG()`，保留 SWD）。
+   **新建工程时第一件事就是确认这一项。**
 
 ### 编译
 
-`Code=3980 RO=304 RW=16 ZI=1704`，0 Error / 0 Warning。
+`Code=3996 RO=304 RW=16 ZI=1704`，0 Error / 0 Warning。
 
-**上板实测待补**：ST-Link 能被识别，但连接目标时报 `Unable to get core ID`（SWD 未连通或目标未供电），所以灯的实际翻转周期尚未用仪器确认。
+**上板实测待补**：曾因 `SYS = No Debug` 导致 SWD 被关闭而无法连接（已修复，见上面第 5 条），
+灯的实际翻转周期尚未用仪器确认。
 
 ## USART_Test（USART1 中断回显）
 
