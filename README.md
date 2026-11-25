@@ -12,7 +12,6 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设对应 
 | [`demo/tim`](demo/tim) | TIM2 更新中断 500ms 翻转 PC13 | [README](demo/tim/README.md) | `Code=4012 RO=304 RW=16 ZI=1704` | ✅ 已上板 SWD 实测初值与 500ms 翻转 |
 | [`demo/adc`](demo/adc) | PA1 单通道 ADC 非阻塞采样 + 串口打印 | [README](demo/adc/README.md) | `Code=6484 RO=328 RW=40 ZI=1752` | ⚠️ 已上板 SWD 实测非阻塞采样与换算（串口打印待接 USB-TTL 复核） |
 | [`demo/usart`](demo/usart) | USART1 中断环形缓冲分帧 + 跨编译器 `printf` | [README](demo/usart/README.md) | `Code=5992 RO=312 RW=40 ZI=1896` | ⚠️ 已上板确认波特率/无半主机卡死/`BUSY_RX`（实验 C 收发待接 USB-TTL） |
-| `demo/pwm` | TIM1 PWM 输出 | — | — | 计划中 |
 
 ## 硬件与全局引脚规划（STM32F103C8T6）
 
@@ -20,7 +19,7 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设对应 
 |---|---|---|---|
 | `PA0` | 按键输入 / `EXTI0`（内部上拉，按下接地） | `key-led`、`exti-key` | 四脚按键接对角；`exti-key` 须用下降沿触发 |
 | `PA1` | `ADC1_IN1` 模拟输入 | `adc` | 悬空读数会拾取干扰乱跳，属正常高阻现象 |
-| `PA9` / `PA10` | `USART1_TX` / `USART1_RX`（115200 8N1） | `adc`、`usart` | 若后续 `demo/pwm` 使用 `TIM1` 默认引脚（`CH1/PA8`、`CH2/PA9`、`CH3/PA10`、`CH4/PA11`），`CH2/CH3` 会与 `USART1` 冲突，建议使用 `TIM1_CH1 (PA8)` 或重映射 `USART1` |
+| `PA9` / `PA10` | `USART1_TX` / `USART1_RX`（115200 8N1） | `adc`、`usart` | 与 `TIM1` 默认 `CH2`/`CH3` 复用同引脚，拓展同时使用时建议使用 `TIM1_CH1 (PA8)` 或重映射 `USART1` |
 | `PA13` / `PA14` | `SWDIO` / `SWCLK`（SWD 调试下载） | 全部工程 | CubeMX `SYS → Debug` 必须选 `Serial Wire`，切勿选 `No Debug` |
 | `PC13` | 板载 LED（低电平点亮，初值 `GPIO_PIN_SET`） | `led`、`key-led`、`exti-key`、`tim` | 上电默认灭灯 |
 | `PD0` / `PD1` | `OSC_IN` / `OSC_OUT`（8MHz HSE） | 全部工程 | 倍频 ×9 得 72MHz 系统时钟 |
