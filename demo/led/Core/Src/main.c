@@ -92,14 +92,14 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-    uint32_t last_flash_tick = HAL_GetTick();
+  uint32_t last_flash_tick = HAL_GetTick();
 
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	      uint32_t now = HAL_GetTick();
+    uint32_t now = HAL_GetTick();
     if ((now - last_flash_tick) >= 500u)
     {
       last_flash_tick += 500u;

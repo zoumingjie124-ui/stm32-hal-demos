@@ -59,7 +59,11 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 
 /* USER CODE BEGIN Private defines */
-
+/* 串口已经配好（USART1, PA9/PA10, 115200），printf 通过 uart_retarget 输出。
+   置 1 启用 printf 与重定向；置 0 时整段被编译掉，脱机也不触发 semihosting。 */
+#ifndef ADC_USE_PRINTF
+#define ADC_USE_PRINTF   1
+#endif
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

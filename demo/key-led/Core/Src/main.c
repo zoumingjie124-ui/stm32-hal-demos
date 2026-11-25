@@ -27,12 +27,19 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+/* 非阻塞按键消抖状态机 */
+typedef enum
+{
+  KEY_STATE_IDLE = 0,         /* 空闲：等待按键按下 */
+  KEY_STATE_DEBOUNCE_PRESS,   /* 按下消抖：等待低电平持续 20ms */
+  KEY_STATE_PRESSED,          /* 已确认按下：等待松手，不阻塞主循环 */
+  KEY_STATE_DEBOUNCE_RELEASE  /* 松手消抖：防止松手抖动误触发 */
+} KeyState_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define KEY_DEBOUNCE_MS   20u   /* 按键软件消抖时间窗（ms） */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -43,7 +50,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+static KeyState_t keyState = KEY_STATE_IDLE;
+static uint32_t debounceStartTick = 0u;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -97,17 +105,53 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET)
+    GPIO_PinState keyPinState = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0);
+    uint32_t nowTick = HAL_GetTick();
+
+    switch (keyState)
     {
-      HAL_Delay(20);                                            /* 等抖动过去 */
-      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) /* 再确认 */
-      {
-        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);                 /* 只翻转一次 */
-        while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET)
+      case KEY_STATE_IDLE:
+        if (keyPinState == GPIO_PIN_RESET)
         {
-          /* 等松手：按住期间不再翻转 */
+          debounceStartTick = nowTick;
+          keyState = KEY_STATE_DEBOUNCE_PRESS;
         }
-      }
+        break;
+
+      case KEY_STATE_DEBOUNCE_PRESS:
+        if (keyPinState != GPIO_PIN_RESET)
+        {
+          keyState = KEY_STATE_IDLE;                 /* 抖动毛刺：未满 20ms 已弹回 */
+        }
+        else if ((nowTick - debounceStartTick) >= KEY_DEBOUNCE_MS)
+        {
+          HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);      /* 确认稳定按下，只翻转一次 */
+          keyState = KEY_STATE_PRESSED;
+        }
+        break;
+
+      case KEY_STATE_PRESSED:
+        if (keyPinState != GPIO_PIN_RESET)
+        {
+          debounceStartTick = nowTick;
+          keyState = KEY_STATE_DEBOUNCE_RELEASE;
+        }
+        break;
+
+      case KEY_STATE_DEBOUNCE_RELEASE:
+        if (keyPinState == GPIO_PIN_RESET)
+        {
+          keyState = KEY_STATE_PRESSED;              /* 松手抖动回弹，继续保持按下态 */
+        }
+        else if ((nowTick - debounceStartTick) >= KEY_DEBOUNCE_MS)
+        {
+          keyState = KEY_STATE_IDLE;                 /* 确认稳定松手，准备下次检测 */
+        }
+        break;
+
+      default:
+        keyState = KEY_STATE_IDLE;
+        break;
     }
   }
   /* USER CODE END 3 */

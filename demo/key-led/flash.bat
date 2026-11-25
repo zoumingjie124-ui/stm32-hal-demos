@@ -34,13 +34,17 @@ if not defined UV4 (
 )
 
 echo [2/3] Building...
-"%UV4%" -b "%PROJ%" -t "%TGT%" -o "%~dp0build.log"
-findstr /c:" 0 Error(s)" "%~dp0build.log" >nul
+set "TMP_LOG=%TEMP%\stm32_keyled_%RANDOM%.log"
+"%UV4%" -b "%PROJ%" -t "%TGT%" -o "%TMP_LOG%"
+findstr /c:" 0 Error(s)" "%TMP_LOG%" >nul 2>&1
 if errorlevel 1 (
-  echo   ERROR: build failed. See build.log
+  echo   ERROR: build failed:
+  if exist "%TMP_LOG%" type "%TMP_LOG%"
+  if exist "%TMP_LOG%" del /q "%TMP_LOG%" >nul 2>&1
   echo   Tip: close Keil first if it has this project open.
   goto :fail
 )
+if exist "%TMP_LOG%" del /q "%TMP_LOG%" >nul 2>&1
 
 set "HEX=MDK-ARM\%TGT%\%TGT%.hex"
 if not exist "%HEX%" (

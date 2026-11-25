@@ -145,9 +145,8 @@ void SystemClock_Config(void)
 /**
   * @brief  EXTI 回调（中断上下文）：按键消抖后翻转 PC13
   * @param  GPIO_Pin 触发中断的引脚
-  * @note   本工程 PA0 配的是 GPIO_MODE_IT_RISING（上升沿），
-  *         而按键另一端接 GND、内部上拉 —— 上升沿对应的是"松手"。
-  *         想让"按下即响应"就要在 CubeMX 里把 PA0 改成 Falling edge。
+  * @note   PA0 已在 EXTI_Key_LED.ioc 中配置为 GPIO_MODE_IT_FALLING + GPIO_PULLUP，
+  *         按下接地产生下降沿时即刻触发中断，无需依赖松手上升沿。
   */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
@@ -157,7 +156,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   {
     uint32_t now = HAL_GetTick();
 
-    if ((now - last_tick) >= 300u)      /* 30ms 内的重复触发当作抖动忽略 */
+    if ((now - last_tick) >= 30u)       /* 30ms 内的重复触发当作抖动忽略 */
     {
       last_tick = now;
       HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
