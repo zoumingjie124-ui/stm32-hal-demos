@@ -6,12 +6,12 @@ STM32F103C8T6 + STM32Cube HAL（FW_F1 V1.8.7）+ Keil MDK5。每个外设对应 
 
 | 目录 | 内容 | 详细文档 | 编译体积（ARMCC V5.06） | 状态 |
 |---|---|---|---|---|
-| [`demo/led`](demo/led) | PC13 板载 LED，500ms 非阻塞闪烁 | [README](demo/led/README.md) | `Code=2752 RO=304 RW=16 ZI=1632` | ✅ 编译通过（仅整理缩进，未重烧） |
-| [`demo/key-led`](demo/key-led) | PA0 按键 4 状态非阻塞消抖翻转 PC13 | [README](demo/key-led/README.md) | `Code=2848 RO=304 RW=24 ZI=1632` | ✅ 仅编译通过（非阻塞重构待上板复测） |
-| [`demo/exti-key`](demo/exti-key) | EXTI 下降沿中断按键 + 30ms 去抖 | [README](demo/exti-key/README.md) | `Code=2852 RO=304 RW=20 ZI=1636` | ✅ 仅编译通过（修复 `30u` 与 `.ioc` 待上板复测） |
-| [`demo/tim`](demo/tim) | TIM2 更新中断 500ms 翻转 PC13 | [README](demo/tim/README.md) | `Code=3996 RO=304 RW=16 ZI=1704` | ✅ 仅编译通过（实测周期待上板） |
-| [`demo/adc`](demo/adc) | PA1 单通道 ADC 非阻塞采样 + 串口打印 | [README](demo/adc/README.md) | `Code=6484 RO=328 RW=40 ZI=1752` | ✅ 仅编译通过（旧阻塞版曾验证线性，非阻塞新版待复测） |
-| [`demo/usart`](demo/usart) | USART1 中断环形缓冲分帧 + 跨编译器 `printf` | [README](demo/usart/README.md) | `Code=5992 RO=312 RW=40 ZI=1896` | ✅ 仅编译通过（旧版实验 A/B 曾通过，实验 C 与重构后待复测） |
+| [`demo/led`](demo/led) | PC13 板载 LED，500ms 非阻塞闪烁 | [README](demo/led/README.md) | `Code=2752 RO=304 RW=16 ZI=1632` | ✅ 已上板 SWD 实测 500ms 翻转 |
+| [`demo/key-led`](demo/key-led) | PA0 按键 4 状态非阻塞消抖翻转 PC13 | [README](demo/key-led/README.md) | `Code=2848 RO=304 RW=24 ZI=1632` | ⚠️ 已上板确认上拉与空闲运行态（按键触发需手动短接 PA0-GND） |
+| [`demo/exti-key`](demo/exti-key) | EXTI 下降沿中断按键 + 30ms 去抖 | [README](demo/exti-key/README.md) | `Code=2852 RO=304 RW=20 ZI=1636` | ⚠️ 已上板确认 `EXTI_FTSR` 下降沿使能（触发去抖需手动短接 PA0-GND） |
+| [`demo/tim`](demo/tim) | TIM2 更新中断 500ms 翻转 PC13 | [README](demo/tim/README.md) | `Code=4012 RO=304 RW=16 ZI=1704` | ✅ 已上板 SWD 实测初值与 500ms 翻转 |
+| [`demo/adc`](demo/adc) | PA1 单通道 ADC 非阻塞采样 + 串口打印 | [README](demo/adc/README.md) | `Code=6484 RO=328 RW=40 ZI=1752` | ⚠️ 已上板 SWD 实测非阻塞采样与换算（串口打印待接 USB-TTL 复核） |
+| [`demo/usart`](demo/usart) | USART1 中断环形缓冲分帧 + 跨编译器 `printf` | [README](demo/usart/README.md) | `Code=5992 RO=312 RW=40 ZI=1896` | ⚠️ 已上板确认波特率/无半主机卡死/`BUSY_RX`（实验 C 收发待接 USB-TTL） |
 | `demo/pwm` | TIM1 PWM 输出 | — | — | 计划中 |
 
 ## 硬件与全局引脚规划（STM32F103C8T6）

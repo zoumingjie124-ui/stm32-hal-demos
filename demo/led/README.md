@@ -41,4 +41,4 @@ scripts\flash.bat led
 ```
 
 编译结果（ARMCC V5.06）：`Code=2752 RO-data=304 RW-data=16 ZI-data=1632`，0 Error(s) / 0 Warning(s)。
-> 状态：本轮仅统一 `main.c` 缩进格式，已完成编译校验（未重烧上板）。
+> 上板实测（ST-Link SWD `HotPlug` 采样）：`uwTick` 在 `108 / 606 / 1090 / 1554 / 2019 / 2488 ms` 时 `GPIOC->ODR`（`PC13`）依次为 `1 → 0 → 1 → 0 → 1 → 0`，500ms 非阻塞翻转正常 ✅。

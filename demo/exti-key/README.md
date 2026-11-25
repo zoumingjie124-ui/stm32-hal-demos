@@ -28,4 +28,4 @@
 ## 编译与验证
 
 编译结果（ARMCC V5.06）：`Code=2852 RO-data=304 RW-data=20 ZI-data=1636`，0 Error(s) / 0 Warning(s)。
-> 状态：已修复原代码去抖时间误写为 `300u` 及 `.ioc` 未同步下降沿的问题，已完成编译校验，尚未重烧上板复测。
+> 上板检查（ST-Link SWD）：实测 `GPIOA->CRL=0x44444448`、`GPIOC->ODR=0x2000`、`EXTI->IMR=0x0001`、`EXTI->RTSR=0x0000`、`EXTI->FTSR=0x0001`（确认 PA0 已配为下降沿中断触发），`uwTick` 连续推进。实际触发翻转与 `30ms` 去抖待物理短接 `PA0` 与 `GND` 复测。

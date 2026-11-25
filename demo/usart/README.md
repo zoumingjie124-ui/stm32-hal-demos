@@ -73,4 +73,4 @@
 ## 编译与验证
 
 编译结果（ARMCC V5.06）：`Code=5992 RO-data=312 RW-data=40 ZI-data=1896`，0 Error(s) / 0 Warning(s)。
-> 状态：旧版实验 A/B 与 `printf` 重定向曾上板通过（COM4 收到 `hello`）；本轮实验 C 健壮性改造与 `uart_retarget` 拆分后已完成编译校验，尚未重烧上板复测。
+> 上板检查（ST-Link SWD）：旧版实验 A/B 与 `printf` 重定向曾上板通过（COM4 收到 `hello`）；本轮重构后上板实测 `USART1->BRR=0x0271`（115200）、`CR1=0x202C`（`UE/RXNEIE/TE/RE` 全开）、`SR=0x00C0`（开机 `hello` 发送完成，未卡死于半主机）、`huart1.RxState=0x22`（`BUSY_RX`）、`rxRearmNeeded=0`、`rx_drop=0`、`rxErrCount=0`。因当前无串口设备连接，实验 C 连续收发与报错分支待接 USB 转 TTL 复测。

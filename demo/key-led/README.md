@@ -37,4 +37,4 @@ scripts\flash.bat key-led
 ```
 
 编译结果（ARMCC V5.06）：`Code=2848 RO-data=304 RW-data=24 ZI-data=1632`，0 Error(s) / 0 Warning(s)。
-> 状态：已按非阻塞状态机重构并编译通过，尚未重烧上板复测。
+> 上板检查（ST-Link SWD）：实测 `GPIOA->CRL=0x44444448`、`GPIOA->ODR=0xA001`（PA0 内部上拉已使能）、`GPIOA->IDR=0x9EFD`（空闲高电平）、`GPIOC->ODR=0x2000`（PC13 初始灭灯）、`keyState=0`（`KEY_STATE_IDLE`）、`uwTick` 连续推进不阻塞。实际按键翻转表现待物理短接 `PA0` 与 `GND` 复测。

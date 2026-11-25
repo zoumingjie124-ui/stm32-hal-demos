@@ -51,4 +51,4 @@ scripts\flash.bat adc
 ```
 
 编译结果（ARMCC V5.06）：`Code=6484 RO-data=328 RW-data=40 ZI-data=1752`，0 Error(s) / 0 Warning(s)。
-> 注：上表线性数据采集于非阻塞重构前；本轮改用 `HAL_GetTick()` 非阻塞节拍并重构 `uart_retarget` 后已完成编译校验，尚未重烧上板复测。
+> 上板实测（ST-Link SWD 读取 RAM）：非阻塞重构版烧录运行后，`lastSampleTick` 按 500ms 推进（`500 → 1500 → 2000 → 3000 → 4000`），`uwTick` 连续递增，`gAdcErrCount=0`；PA1 悬空采样读出 `raw=1792 / mv=1444`、`raw=2054 / mv=1655`、`raw=2098 / mv=1690`，与 `raw*3300/4095` 一致。外部电位器电压线性度（此前阻塞版已测）与串口助手显示待接 USB 转 TTL 后复核。

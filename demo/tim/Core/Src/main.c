@@ -89,10 +89,16 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  /* 清除 HAL_TIM_Base_Init() 中 EGR.UG 可能残留的更新标志，避免刚开中断就在 t=0ms 误进一次回调 */
+  __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
+
   /* 启动定时器的中断模式：计数器开始跑，且每次更新（溢出）都会进 TIM2_IRQHandler。
      注意不能用 HAL_TIM_Base_Start()——那个只启动计数，不开更新中断，
      结果是计数器在跑、UIF 也置位，但永远不会进回调。 */
-  HAL_TIM_Base_Start_IT(&htim2);
+  if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
